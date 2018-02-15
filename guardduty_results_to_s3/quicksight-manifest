@@ -1,0 +1,22 @@
+
+{
+    "fileLocations": [
+        {
+            "URIs": [
+                "s3://nk-gd-findings/nk-gd-findings.csv"
+            ]
+        },
+        {
+            "URIPrefixes": [
+                "s3://nk-gd-findings/"
+            ]
+        }
+    ],
+    "globalUploadSettings": {
+        "format": "CSV",
+        "delimiter": ",",
+        "textqualifier": "'",
+        "containsHeader": "true"
+    }
+}
+   
