@@ -14,35 +14,52 @@ import datetime
 import pycurl
 from time import gmtime, strftime
 from dateutil import parser
-#import MySQLdb
+import MySQLdb
 
 gd = boto3.client('guardduty')
 s3 = boto3.resource('s3')
+s3_client = boto3.client('s3')
 ec2 = boto3.client('ec2')
+ddb = boto3.client('dynamodb')
 
 bucket = "nk-gd-findings"
 file_path = "/tmp/"
 file_name = strftime("%Y-%m-%d-%H:%M:%S", gmtime()) + "-findings.csv"
+config_bucket = "nk-gd-config"
+config_file = "gd-config.json"
 date = strftime("%Y-%m-%d-%H:%M:%S", gmtime())
 network_connection_violation = 1
 port_probe_violation = 1
+db_name = "gd_findings"
 
-host="<HOST>"
-port="<PORT>"
-dbname="<DBNAME>"
-user="<USERNAME>"
-password="<PASSWORD>"
+get_db_config = s3.meta.client.download_file(config_bucket, config_file, config_file)
 
-#conn = MySQLdb.connect(host, user=user,port=port,
-#                           passwd=password, db=dbname)
+def get_db_config():
+    content_loads = json.load(open(config_file))
+    global db_user
+    global db_password
+    global db_host
+    global db_port
 
-#c = conn.cursor()
-#c.execute("""CREATE TABLE IF NOT EXISTS attacks (
-#    gd_event_id VARCHAR(32) NOT NULL,
-#    offender_ip VARCHAR(15) NOT NULL,
-#    attacked_port VARCHAR(5) NOT NULL,
-#    last_seen DATETIME NOT NULL
-#    )""")
+    db_user = content_loads['databaseconfig']['dbusername']
+    db_password = content_loads['databaseconfig']["dbpassword"]
+    db_host = content_loads['databaseconfig']["dbhost"]
+    db_port = int(content_loads['databaseconfig']["dbport"])
+    return(db_user)
+
+get_db_config()
+
+
+conn = MySQLdb.connect(db_host, user=db_user,port=db_port,
+                           passwd=db_password, db=db_name)
+
+c = conn.cursor()
+c.execute("""CREATE TABLE IF NOT EXISTS attacks (
+    gd_event_id VARCHAR(32) NOT NULL,
+    offender_ip VARCHAR(15) NOT NULL,
+    attacked_port VARCHAR(5) NOT NULL,
+    last_seen DATETIME NOT NULL
+    )""")
 
 #Used to parse the JSON Serialization for time - REQUIRED
 def datetime_handler(x):
@@ -86,13 +103,38 @@ def nacl_ips():
     all_nacl_ips = current_ips
     return(all_nacl_ips)
 
-def desc_instances():
-    try:
+def block_ip():
+#    if offender_ip in current_ips:
+#        print("%s is already blocked in the NACL %s" % (offender_ip, nacl_id))
+#    else:
+#        ec2.create_network_acl_entry(CidrBlock=(offender_ip), Egress=False, NetworkAclId=nacl_id, Protocol="-1", RuleAction='deny', RuleNumber=current_rule_numbers[-1] + 1)
+    print("Blocked IP %s for attacking %s on port %s" %(offender_ip, instance_id, attacked_port))
+    write_db()
+
+def write_db():
+         sql = "INSERT INTO attacks (gd_event_id,offender_ip,attacked_port,last_seen) VALUES('%s','%s','%s','%s')" % (gd_event_id, offender_ip, attacked_port, last_24)
+         print(sql)
+
+         c.execute(sql)
+         conn.commit()
+
+def instance_details():
+    if instance_id == "i-999999":
+        print("This instance ID (%s) appears to be from test findings.  Skipping this instance." %(instance_id))
+        pass
+    else:
         global desc_instance
+        global desc_nacls
+        global nacl_id
         desc_instance = ec2.describe_instances(InstanceIds=[instance_id])
-        return(desc_instance)
-    except:
-        print("Terrible error occurred")
+        vpc = desc_instance["Reservations"][0]["Instances"][0]["VpcId"]
+        desc_nacls = ec2.describe_network_acls(Filters=[{'Name':'vpc-id', 'Values': [vpc]}])
+        nacl_id = desc_nacls["NetworkAcls"][0]["NetworkAclId"]
+        nacl_rule_numbers()
+        nacl_ips()
+        block_ip()
+        wtite_db()
+    return(desc_instance)
 
 
 #Check all findings assigned to the detector defined above
@@ -117,24 +159,8 @@ for i in findings_json_loads["FindingIds"]:
          if count >= network_connection_violation:
           if get_findings_json_loads["Findings"][0]["Resource"]["ResourceType"] == "Instance":
             instance_id = get_findings_json_loads["Findings"][0]["Resource"]["InstanceDetails"]["InstanceId"]
-            print(instance_id)
-            desc_instances()
-            vpc = desc_instance["Reservations"][0]["Instances"][0]["VpcId"]
-            desc_nacls = ec2.describe_network_acls(Filters=[{'Name':'vpc-id', 'Values': [vpc]}])
-            nacl_id = desc_nacls["NetworkAcls"][0]["NetworkAclId"]
-            nacl_rule_numbers()
-            nacl_ips()
-            if offender_ip in current_ips:
-              print("%s is already blocked in the NACL %s" % (offender_ip, nacl_id))
-            else:
-              ec2.create_network_acl_entry(CidrBlock=(offender_ip), Egress=False, NetworkAclId=nacl_id, Protocol="-1", RuleAction='deny', RuleNumber=current_rule_numbers[-1] + 1)
-              print("Blocked IP %s for attacking %s on port %s" %(offender_ip, instance_id, attacked_port))
+            instance_details()
 
-#         sql = "INSERT INTO attacks (gd_event_id,offender_ip,attacked_port,last_seen) VALUES('%s','%s','%s','%s')" % (gd_event_id, offender_ip, attacked_port, last_24)
-#         print(sql)
-
-#         c.execute(sql)
-#         conn.commit()
         
 
 # Upload file to an S3 bucket for analysis
