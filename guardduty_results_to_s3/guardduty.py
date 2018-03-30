@@ -57,7 +57,7 @@ detectors_json_loads = json.loads(detectors_json_dumps)
 detector = detectors_json_loads['DetectorIds'][0]
 
 # Grab all findings under the detector
-findings = gd.list_findings(DetectorId=detector)
+findings = gd.list_findings(DetectorId=detector, FindingCriteria={'Criterion':{'service.archived':{'Neq':['True']}}})
 findings_json_dumps = json.dumps(findings)
 findings_json_loads = json.loads(findings_json_dumps)
 
@@ -98,7 +98,6 @@ def desc_instances():
 #Check all findings assigned to the detector defined above
 for i in findings_json_loads["FindingIds"]:
     get_findings = gd.get_findings(DetectorId=detector,FindingIds=[i])
-    #print(get_findings)
     get_findings_json_dumps = json.dumps(get_findings, default=datetime_handler)
     get_findings_json_loads = json.loads(get_findings_json_dumps)
     if get_findings_json_loads["Findings"][0]["Service"]["Action"]["ActionType"] == "PORT_PROBE":
@@ -118,6 +117,7 @@ for i in findings_json_loads["FindingIds"]:
          if count >= network_connection_violation:
           if get_findings_json_loads["Findings"][0]["Resource"]["ResourceType"] == "Instance":
             instance_id = get_findings_json_loads["Findings"][0]["Resource"]["InstanceDetails"]["InstanceId"]
+            print(instance_id)
             desc_instances()
             vpc = desc_instance["Reservations"][0]["Instances"][0]["VpcId"]
             desc_nacls = ec2.describe_network_acls(Filters=[{'Name':'vpc-id', 'Values': [vpc]}])
@@ -128,7 +128,7 @@ for i in findings_json_loads["FindingIds"]:
               print("%s is already blocked in the NACL %s" % (offender_ip, nacl_id))
             else:
               ec2.create_network_acl_entry(CidrBlock=(offender_ip), Egress=False, NetworkAclId=nacl_id, Protocol="-1", RuleAction='deny', RuleNumber=current_rule_numbers[-1] + 1)
-              print("Blocked IP %s for attacking %s" %(offender_ip, attacked_port))
+              print("Blocked IP %s for attacking %s on port %s" %(offender_ip, instance_id, attacked_port))
 
 #         sql = "INSERT INTO attacks (gd_event_id,offender_ip,attacked_port,last_seen) VALUES('%s','%s','%s','%s')" % (gd_event_id, offender_ip, attacked_port, last_24)
 #         print(sql)
