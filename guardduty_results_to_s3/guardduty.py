@@ -103,20 +103,27 @@ def nacl_ips():
     all_nacl_ips = current_ips
     return(all_nacl_ips)
 
-def block_ip():
-#    if offender_ip in current_ips:
-#        print("%s is already blocked in the NACL %s" % (offender_ip, nacl_id))
-#    else:
-#        ec2.create_network_acl_entry(CidrBlock=(offender_ip), Egress=False, NetworkAclId=nacl_id, Protocol="-1", RuleAction='deny', RuleNumber=current_rule_numbers[-1] + 1)
-    print("Blocked IP %s for attacking %s on port %s" %(offender_ip, instance_id, attacked_port))
-    write_db()
-
 def write_db():
-         sql = "INSERT INTO attacks (gd_event_id,offender_ip,attacked_port,last_seen) VALUES('%s','%s','%s','%s')" % (gd_event_id, offender_ip, attacked_port, last_24)
-         print(sql)
+         check_item_exists = "SELECT * FROM attacks WHERE offender_ip='%s' AND last_seen='%s' AND attacked_port='%s' AND gd_event_id='%s'" % (offender_ip, last_24, attacked_port, gd_event_id)
+         check_exists = c.execute(check_item_exists)
 
-         c.execute(sql)
-         conn.commit()
+         if check_exists == 1:
+            print("testing - in exists try")
+            sql = "INSERT INTO attacks (gd_event_id,offender_ip,attacked_port,last_seen) VALUES('%s','%s','%s','%s')" % (gd_event_id, offender_ip, attacked_port, last_24)
+            c.execute(sql)
+            conn.commit()
+            block_ip()
+         elif check_exists == 0:
+            print("%s is already in the database for attacking %s, and was last seen %s!" % (offender_ip, attacked_port, last_24))
+
+def block_ip():
+    if offender_ip in current_ips:
+        print("%s is already blocked in the NACL %s" % (offender_ip, nacl_id))
+        write_db()
+    else:
+       # ec2.create_network_acl_entry(CidrBlock=(offender_ip + "/32"), Egress=False, NetworkAclId=nacl_id, Protocol="-1", RuleAction='deny', RuleNumber=current_rule_numbers[-1] + 1)
+        print("Blocked IP %s/32 for attacking %s on port %s" %(offender_ip, instance_id, attacked_port))
+        write_db()
 
 def instance_details():
     if instance_id == "i-999999":
@@ -133,7 +140,6 @@ def instance_details():
         nacl_rule_numbers()
         nacl_ips()
         block_ip()
-        wtite_db()
     return(desc_instance)
 
 
@@ -148,7 +154,7 @@ for i in findings_json_loads["FindingIds"]:
 #            print("Remote IP Details = " + get_findings_json_loads["Findings"][0]["Service"]["Action"]["PortProbeAction"]["PortProbeDetails"][0]["RemoteIpDetails"]["IpAddressV4"])
 #            continue
          gd_event_id = get_findings_json_loads["Findings"][0]["Id"]
-         offender_ip = get_findings_json_loads["Findings"][0]["Service"]["Action"]["PortProbeAction"]["PortProbeDetails"][0]["RemoteIpDetails"]["IpAddressV4"] + "/32"
+         offender_ip = get_findings_json_loads["Findings"][0]["Service"]["Action"]["PortProbeAction"]["PortProbeDetails"][0]["RemoteIpDetails"]["IpAddressV4"]
          attacked_port = str(get_findings_json_loads["Findings"][0]["Service"]["Action"]["PortProbeAction"]["PortProbeDetails"][0]["LocalPortDetails"]["Port"])
          last_seen =  get_findings_json_loads["Findings"][0]["Service"]["EventLastSeen"]
          last_24 = parser.parse(last_seen).strftime('%y-%m-%d %H:%M:%S')
